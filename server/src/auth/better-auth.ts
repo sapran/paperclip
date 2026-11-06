@@ -3,9 +3,11 @@ import type { IncomingHttpHeaders } from "node:http";
 import { betterAuth, type Auth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { toNodeHandler } from "better-auth/node";
+import { passkey } from "@better-auth/passkey";
 import type { Db } from "@paperclipai/db";
 import {
   authAccounts,
+  authPasskeys,
   authSessions,
   authUsers,
   authVerifications,
@@ -257,6 +259,24 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins:
     publicUrl,
   });
 
+  const workspaceHandoffIdentity = resolveWorkspaceHandoffIdentity(config);
+  const plugins = [
+    passkey(),
+    ...(workspaceHandoffIdentity
+      ? [workspaceLoginHandoffPlugin({
+          db,
+          resolveExpectedIdentity: () =>
+            resolveWorkspaceHandoffIdentity(config) ?? {
+              key: null,
+              instanceId: null,
+              executionWorkspaceId: null,
+              companyId: null,
+              origin: null,
+            },
+        })]
+      : []),
+  ];
+
   const authConfig = {
     baseURL: baseUrl,
     secret,
@@ -268,6 +288,7 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins:
         session: authSessions,
         account: authAccounts,
         verification: authVerifications,
+        passkey: authPasskeys,
       },
     }),
     emailAndPassword: {
@@ -281,28 +302,9 @@ export function createBetterAuthInstance(db: Db, config: Config, trustedOrigins:
       override: process.env.PAPERCLIP_AUTH_RATE_LIMIT_ENABLED,
     }),
     advanced: buildBetterAuthAdvancedOptions({ disableSecureCookies }),
-    // Registered only for a managed workspace instance: the plugin is what makes
-    // `Open workspace` password-independent, and a control-plane instance that
-    // was never handed a workspace key must not expose the exchange at all.
-    ...(resolveWorkspaceHandoffIdentity(config)
-      ? {
-          plugins: [
-            workspaceLoginHandoffPlugin({
-              db,
-              // Re-resolved per exchange so a hot restart cannot keep validating
-              // against an origin the control plane has since republished.
-              resolveExpectedIdentity: () =>
-                resolveWorkspaceHandoffIdentity(config) ?? {
-                  key: null,
-                  instanceId: null,
-                  executionWorkspaceId: null,
-                  companyId: null,
-                  origin: null,
-                },
-            }),
-          ],
-        }
-      : {}),
+    // Passkeys are available in every authenticated instance. Workspace handoff
+    // remains conditional on a managed workspace identity.
+    plugins,
   };
 
   if (!baseUrl) {
