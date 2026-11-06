@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Camera, LoaderCircle, Save, Trash2, UserRoundPen } from "lucide-react";
+import { Camera, KeyRound, LoaderCircle, Pencil, Save, Trash2, UserRoundPen } from "lucide-react";
 import type { AuthSession, CurrentUserProfile, UpdateCurrentUserProfile } from "@paperclipai/shared";
 import { authApi } from "@/api/auth";
 import { useAccountBoundMutation } from "@/hooks/useAccountBoundMutation";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { describeError } from "@/api/errors";
+import { passkeyAuthClient, passkeyAvailabilityMessage, passkeyErrorMessage } from "@/lib/passkeys";
 
 function deriveInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -32,11 +33,22 @@ export function ProfileSettings() {
   const [name, setName] = useState("");
   const [image, setImage] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [passkeyName, setPasskeyName] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
   const sessionQuery = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
   });
   const sessionView = useQueryView(sessionQuery);
+  const passkeyQuery = useQuery({
+    queryKey: ["auth", "passkeys"],
+    queryFn: async () => {
+      const result = await passkeyAuthClient.passkey.listUserPasskeys();
+      if (result.error) throw new Error(result.error.message || "Could not load passkeys.");
+      return result.data ?? [];
+    },
+    enabled: Boolean(sessionQuery.data),
+  });
 
   useEffect(() => {
     setBreadcrumbs([
@@ -154,6 +166,20 @@ export function ProfileSettings() {
   const uploadHint = selectedCompany
     ? `Stored in Paperclip file storage for ${selectedCompany.name}.`
     : "Select an organization to upload an avatar into Paperclip storage.";
+  const passkeyUnavailable = passkeyAvailabilityMessage();
+
+  async function runPasskeyAction(action: () => Promise<unknown>) {
+    setPasskeyBusy(true);
+    setActionError(null);
+    try {
+      await action();
+      await passkeyQuery.refetch();
+    } catch (error) {
+      setActionError(passkeyErrorMessage(error));
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
 
   return (
     <div className="max-w-6xl space-y-6">
@@ -287,6 +313,78 @@ export function ProfileSettings() {
         </form>
 
         <InboxAgentPolicyControl companyId={selectedCompanyId} />
+
+        <Card className="block space-y-5 p-6">
+          <div className="flex items-start gap-3">
+            <KeyRound className="mt-0.5 size-5 text-muted-foreground" />
+            <div>
+              <h2 className="font-semibold">Passkeys</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Use your device, password manager, or security key to sign in. Keep your password as a recovery option.
+              </p>
+            </div>
+          </div>
+
+          {passkeyUnavailable ? (
+            <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+              {passkeyUnavailable}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Input
+                value={passkeyName}
+                onChange={(event) => setPasskeyName(event.target.value)}
+                placeholder="Work laptop"
+                aria-label="Passkey name"
+                maxLength={120}
+              />
+              <Button
+                type="button"
+                disabled={passkeyBusy || !passkeyName.trim()}
+                onClick={() => runPasskeyAction(async () => {
+                  const result = await passkeyAuthClient.passkey.addPasskey({ name: passkeyName.trim() });
+                  if (result.error) throw new Error(result.error.message || "Could not add passkey.");
+                  setPasskeyName("");
+                })}
+              >
+                {passkeyBusy ? <LoaderCircle className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                Add passkey
+              </Button>
+            </div>
+          )}
+
+          <div className="divide-y divide-border rounded-md border border-border">
+            {passkeyQuery.isLoading ? (
+              <p className="p-4 text-sm text-muted-foreground">Loading passkeys…</p>
+            ) : passkeyQuery.error ? (
+              <p className="p-4 text-sm text-destructive">{describeError(passkeyQuery.error).body}</p>
+            ) : passkeyQuery.data?.length ? passkeyQuery.data.map((key) => (
+              <div key={key.id} className="flex flex-wrap items-center gap-3 p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{key.name || "Passkey"}</p>
+                  <p className="text-xs text-muted-foreground">Added {key.createdAt ? new Date(key.createdAt).toLocaleDateString() : "on this account"}</p>
+                </div>
+                <Button type="button" size="sm" variant="outline" disabled={passkeyBusy} onClick={() => {
+                  const name = window.prompt("Name this passkey", key.name || "Passkey")?.trim();
+                  if (!name) return;
+                  void runPasskeyAction(async () => {
+                    const result = await passkeyAuthClient.passkey.updatePasskey({ id: key.id, name });
+                    if (result.error) throw new Error(result.error.message || "Could not rename passkey.");
+                  });
+                }}><Pencil className="size-4" />Rename</Button>
+                <Button type="button" size="sm" variant="outline" disabled={passkeyBusy} onClick={() => {
+                  if (!window.confirm(`Remove ${key.name || "this passkey"}? Password sign-in will still work.`)) return;
+                  void runPasskeyAction(async () => {
+                    const result = await passkeyAuthClient.passkey.deletePasskey({ id: key.id });
+                    if (result.error) throw new Error(result.error.message || "Could not remove passkey.");
+                  });
+                }}><Trash2 className="size-4" />Remove</Button>
+              </div>
+            )) : (
+              <p className="p-4 text-sm text-muted-foreground">No passkeys yet. Add one from a device you trust.</p>
+            )}
+          </div>
+        </Card>
       </section>
     </div>
   );

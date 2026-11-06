@@ -223,7 +223,15 @@ future public-hosted setup design explicitly changes this policy.
 - canonical naming is `local_trusted` and `authenticated` with `private/public` exposure
 - no long-term compatibility alias layer for discarded naming variants
 
-## 11. Relationship to Other Docs
+## 11. Passkeys
+
+Passkeys are available in authenticated deployments. Registration and sign-in require a secure browser context: use HTTPS for deployed instances or `http://localhost` during local development. Password sign-in remains available as a recovery method.
+
+WebAuthn binds each passkey to the hostname (the relying-party ID) where it was registered. Configure one canonical public hostname with `BETTER_AUTH_URL` or the existing Paperclip public-auth URL setting, and keep that hostname stable. A passkey registered on one hostname cannot be used on another hostname, even when both names reach the same Paperclip instance.
+
+When Paperclip runs behind a reverse proxy, terminate HTTPS at the proxy, preserve the original `Host` header, and send `X-Forwarded-Proto: https`. Add only the intended public hostname to Paperclip's allowed hostnames and trusted origins. Do not add broad origin patterns or downgrade secure cookies to make passkeys work. Multi-host deployments need a deliberate canonical-host redirect; passkeys are not shared across unrelated hostnames.
+
+## 12. Relationship to Other Docs
 
 - implementation plan: `doc/plans/2026-02-23-deployment-auth-mode-consolidation.md`
 - V1 contract: `doc/SPEC-implementation.md`

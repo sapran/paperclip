@@ -15,6 +15,7 @@ import { PaperclipLoading } from "@/components/AnimatedPaperclipIcon";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PaperclipLockup } from "../components/PaperclipLockup";
 import { QueryErrorState, useQueryView } from "../components/QueryView";
+import { passkeyAuthClient, passkeyAvailabilityMessage, passkeyErrorMessage } from "@/lib/passkeys";
 
 type AuthMode = "sign_in" | "sign_up";
 
@@ -83,6 +84,20 @@ export function AuthPage() {
     onError: (err) => {
       setError(describeError(err).body);
     },
+  });
+  const passkeyMutation = useMutation({
+    mutationFn: async () => {
+      const unavailable = passkeyAvailabilityMessage();
+      if (unavailable) throw new Error(unavailable);
+      const result = await passkeyAuthClient.signIn.passkey();
+      if (result.error) throw new Error(result.error.message || "Passkey sign-in failed.");
+    },
+    onSuccess: async () => {
+      setError(null);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.session });
+      navigate(nextPath, { replace: true });
+    },
+    onError: (err) => setError(passkeyErrorMessage(err)),
   });
 
   const canSubmit =
@@ -222,6 +237,28 @@ export function AuthPage() {
                   : "Create Account"}
             </Button>
           </form>
+
+          {mode === "sign_in" ? (
+            <div className="mt-4 space-y-3">
+              <div className="flex items-center gap-3 text-xs text-muted-foreground" aria-hidden="true">
+                <span className="h-px flex-1 bg-border" />
+                <span>or</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={passkeyMutation.isPending}
+                onClick={() => passkeyMutation.mutate()}
+              >
+                {passkeyMutation.isPending ? "Waiting for passkey…" : "Sign in with a passkey"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Password sign-in remains available if you cannot use your passkey.
+              </p>
+            </div>
+          ) : null}
 
           <div className="mt-5 text-sm text-muted-foreground">
             {mode === "sign_in" ? "Need an account?" : "Already have an account?"}{" "}

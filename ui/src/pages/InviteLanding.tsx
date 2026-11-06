@@ -13,6 +13,7 @@ import { fetchCompanyListForCurrentAccount, useCompanyListQuery } from "../api/c
 import { healthApi } from "../api/health";
 import { getAdapterLabel } from "../adapters/adapter-display-registry";
 import { clearPendingInviteToken, rememberPendingInviteToken } from "../lib/invite-memory";
+import { passkeyAuthClient, passkeyAvailabilityMessage, passkeyErrorMessage } from "../lib/passkeys";
 import { queryKeys } from "../lib/queryKeys";
 import { formatDate } from "../lib/utils";
 
@@ -429,6 +430,21 @@ export function InviteLandingPage() {
       setAuthFeedback(nextFeedback);
     },
   });
+  const invitePasskeyMutation = useMutation({
+    mutationFn: async () => {
+      const unavailable = passkeyAvailabilityMessage();
+      if (unavailable) throw new Error(unavailable);
+      const response = await passkeyAuthClient.signIn.passkey();
+      if (response.error) throw new Error(response.error.message || "Passkey sign-in failed.");
+    },
+    onSuccess: async () => {
+      setAuthFeedback(null);
+      rememberPendingInviteToken(token);
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.session });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.access.currentBoardAccess });
+    },
+    onError: (error) => setAuthFeedback({ tone: "error", message: passkeyErrorMessage(error) }),
+  });
 
   const joinButtonLabel = useMemo(() => {
     if (!invite) return "Continue";
@@ -809,6 +825,25 @@ export function InviteLandingPage() {
                         : "Create account and continue"}
                   </Button>
                 </form>
+
+                {authMode === "sign_in" ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3 text-xs text-zinc-500" aria-hidden="true">
+                      <span className="h-px flex-1 bg-zinc-800" />
+                      <span>or</span>
+                      <span className="h-px flex-1 bg-zinc-800" />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full rounded-none border-zinc-700 bg-transparent text-zinc-100"
+                      disabled={invitePasskeyMutation.isPending}
+                      onClick={() => invitePasskeyMutation.mutate()}
+                    >
+                      {invitePasskeyMutation.isPending ? "Waiting for passkey…" : "Sign in with a passkey"}
+                    </Button>
+                  </div>
+                ) : null}
 
                 <p className="text-xs leading-5 text-zinc-500">
                   {authMode === "sign_up"
