@@ -2018,8 +2018,7 @@ describeEmbeddedPostgres("tool gateway service", () => {
     });
 
     // The server carries out the approved call itself with no interactive
-    // caller left to raise timeoutMs, so it must get the full 60s headroom
-    // rather than the 10s interactive default.
+    // caller left to provide timeoutMs, so it must retain the full 60s deadline.
     const [executedEvent] = await db.select().from(toolCallEvents).where(and(
       eq(toolCallEvents.actionRequestId, actionRequest.id),
       eq(toolCallEvents.reasonCode, "approved_action_executed"),
