@@ -5,6 +5,7 @@
 ### Patch Changes
 
 - Bound full-tree workspace Git scans with process-wide concurrency, queue, timeout, cancellation, coalescing, and short-lived changed-file caching. Saturated or timed-out changed-file requests now return a retryable degraded response, and hidden file-browser panels no longer initiate scans.
+- Increase the default tool gateway deadline from 10 to 60 seconds so slower MCP calls can finish, while preserving explicit shorter caller timeouts and the 60-second cap.
 
 ## 0.3.1
 

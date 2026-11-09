@@ -1789,6 +1789,49 @@ describeEmbeddedPostgres("tool gateway acceptance", () => {
     });
   });
 
+  it("completes a local stdio MCP result after ten seconds without a timeout override", async () => {
+    const company = await createCompany(db);
+    const agent = await createAgent(db, company.id);
+    const { run } = await createIssueAndRun(db, company.id, agent.id);
+    const localTool = await createLocalStdioMcpTool(db, company.id, {
+      applicationKey: "local-slow-result",
+      // Real subprocess timing exercises the deadline; fake timers cannot advance the child process clock.
+      stdioScript: `
+const readline = require("node:readline");
+const rl = readline.createInterface({ input: process.stdin });
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2024-11-05", capabilities: {}, serverInfo: { name: "slow-stdio", version: "0.0.0" } } }) + "\\n");
+    return;
+  }
+  if (message.method === "tools/call") {
+    setTimeout(() => {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: "delayed MCP result" }] } }) + "\\n");
+    }, 11_000);
+  }
+});
+`,
+    });
+    const toolName = expectedConnectedToolName({
+      applicationKey: localTool.application.applicationKey,
+      connectionId: localTool.connection.id,
+      toolName: "echo",
+    });
+    await allowToolsForAgent(db, company.id, agent.id, [toolName]);
+    const gateway = createTestToolGatewayService(db);
+    const session = await gateway.createSession({ companyId: company.id, agentId: agent.id, runId: run.id });
+
+    await expect(gateway.executeTool({
+      sessionToken: session.token,
+      tool: toolName,
+      parameters: { message: "slow response" },
+    })).resolves.toMatchObject({
+      status: "completed",
+      result: { content: "delayed MCP result" },
+    });
+  }, 30_000);
+
   it("passes only approved env values to local stdio MCP processes", async () => {
     const previousDatabaseUrl = process.env.DATABASE_URL;
     process.env.DATABASE_URL = "postgres://server-secret.example/paperclip";
