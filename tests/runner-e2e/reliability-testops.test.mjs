@@ -39,7 +39,7 @@ test('the plan is six DeepSeek 1017 cells plus native Codex for steering, Dayton
   assert.ok(reliabilityDefinitions.every(row => row.fullName === `paperclip.Product E2E.everyday-workflows.${row.name}`));
   // OpenCode declares steering: false, so only queue-steer uses the steering-capable native Codex cell.
   assert.deepEqual(reliabilityDefinitions.filter(row => row.profile !== reliabilityProfile || row.model !== reliabilityModel)
-    .map(row => [row.name, row.profile, row.model, row.environment]), [['queue-steer', 'runner-codex', 'gpt-5.6-sol', 'daytona']]);
+    .map(row => [row.name, row.profile, row.model, row.environment]), [['queue-steer', 'runner-codex', 'gpt-6.1-sol', 'daytona']]);
   assert.deepEqual(reliabilityDefinitions.filter(row => row.profile === reliabilityProfile && row.environment === 'daytona').map(row => row.name),
     ['three-turn-revise', 'long-silent-command', 'queued-across-restart']);
   assert.equal(testOpsPlanDetails.reliability.size, 7);
@@ -196,6 +196,8 @@ function fakeTestOps({ existing = [], plan = null, assignments = [], standing = 
     if (method === 'GET' && url.pathname === '/api/testplan') return { content: state.plan ? [{ id: state.plan.id, name: state.plan.name }] : [], totalPages: 1 };
     if (method === 'POST' && url.pathname === '/api/testplan') {
       state.plan = { id: 77, projectId: 1, name: body.name, treeSelection: body.treeSelection, testCasesCount: body.treeSelection.leafsInclude.length };
+      // Live TestOps lists a new plan's uncovered cases as one job-less row.
+      state.assignments = [{ testCasesCount: body.treeSelection.leafsInclude.length }];
       return { id: 77 };
     }
     if (method === 'GET' && url.pathname === '/api/testplan/77') return state.plan;
@@ -291,6 +293,20 @@ test('registration refuses a standing plan without exactly one trusted job or a 
   await registerReliability(api);
   state.assignments = [{ job: { id: 99 }, testCasesCount: 7 }];
   await assert.rejects(registerReliability(api), /plan_job_conflict/);
+});
+
+test('a plan TestOps reports only as a job-less row is unassigned, so registration assigns the standing job', async () => {
+  const { api, state } = fakeTestOps();
+  await registerReliability(api);
+  // Reproduces staging plan 135: created, then the run stopped before assignment.
+  state.assignments = [{ testCasesCount: 7 }];
+  const inspected = await inspectReliability(api);
+  assert.deepEqual(inspected.assignments, []);
+  assert.equal(registrationReceipt('inspect', inspected, env).complete, false);
+  const repaired = await registerReliability(api);
+  assert.equal(repaired.created.assignment, true);
+  assert.deepEqual(state.assignments.map(row => row.job?.id), [50]);
+  assert.equal(registrationReceipt('register', repaired, { GITHUB_RUN_ID: '1', GITHUB_SHA: workflowSha }).complete, true);
 });
 
 test('the workflows expose the reliability plan without new provider or reporting authority', async () => {

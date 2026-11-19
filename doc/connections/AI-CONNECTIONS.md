@@ -41,6 +41,14 @@ the provider's API key, and Advanced. All three stay visible while the selected
 mode's form is shown below. Advanced opens the existing compatible-connection
 picker and provider setup. Execution environment selection lives in Configure.
 
+Back from subscription sign-in cancels that attempt and pending prompt or status
+reads. A session returned after Back is released instead of reopening sign-in. If an
+aborted read hides the session ID, a separate owner lookup releases the attempt
+before a replacement can start. Cleanup checks the abandoned environment and
+account intent, so a conflicting settings sign-in stays active.
+Selecting a subscription again starts a fresh attempt. Reloading the page can
+still resume a sign-in that was not cancelled.
+
 Storybook's simulated controllers and page annotations do not run in the app.
 
 ## Compatibility and selection
@@ -64,6 +72,26 @@ browser sign-in presentation with a local login runner and require no sandbox.
 Environment selection does not change agent execution settings.
 API keys are validated against fixed provider endpoints; redirects
 and caller-supplied validation URLs are rejected.
+
+In **Connectors**, expand a provider's accounts. A crown beside an account's name
+marks your saved default for that provider in this company. Hover, focus, or tap
+the crown for its label. In another personal account's menu, choose **Set as
+default for OpenAI**, **Set as default for Claude**, or the matching provider.
+Subscription and API-key accounts share one provider default. The current default
+has a disabled **Default for {provider}** menu item. The list API's `canSetDefault`
+flag projects human self-service configure authority once per list request.
+Agent list responses omit this optional UI field and retain their existing
+write authorization. Shared accounts, other owners,
+routed profiles, and callers without permission do not receive this action.
+
+While saving, the previous crown stays visible and other default writes for that
+provider are disabled. After success, scoped account data and agent selectors
+refresh from the server. Failed writes retain the previous selection and offer
+an explicit Retry for the same grant, with eligibility checked again. Returning
+to the tab refreshes defaults changed elsewhere. An unavailable selected account
+keeps its crown and **Default unavailable** state until it is reconnected or
+explicitly replaced. Changing the preference grants no access and affects the
+next normal run admission; pinned selections and active runs retain their accounts.
 
 `runtimeConfig.aiConnection` contains `provider`, `mode`, and `method`. For responsible-user selections, `method` is a legacy wire hint retained for rolling upgrades; the resolver uses the selected account’s actual method:
 
